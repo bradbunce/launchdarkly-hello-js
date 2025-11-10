@@ -1,0 +1,16 @@
+{
+  "name": "launchdarkly-js-sample",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "launchdarkly-js-client-sdk": "^3.9.0"
+  },
+  "devDependencies": {
+    "vite": "^5.0.0"
+  }
+}
