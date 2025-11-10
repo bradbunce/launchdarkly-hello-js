@@ -9,6 +9,8 @@
   <body>
     <script type="module">
     import * as LDClient from 'launchdarkly-js-client-sdk';
+    import Observe from '@launchdarkly/observability';
+    import SessionReplay from '@launchdarkly/session-replay';
 
     function main()
     {
@@ -35,7 +37,20 @@
         return;
       }
 
-      const ldclient = LDClient.initialize(clientSideID, context);
+      // Initialize SDK with observability plugins
+      const ldclient = LDClient.initialize(clientSideID, context, {
+        plugins: [
+          new Observe({
+            networkRecording: {
+              enabled: true,
+              recordHeadersAndBody: true
+            }
+          }),
+          new SessionReplay({
+            privacySetting: 'default'
+          })
+        ]
+      });
 
       function render() {
         const flagValue = ldclient.variation(flagKey, false);

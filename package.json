@@ -8,7 +8,9 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "launchdarkly-js-client-sdk": "^3.9.0"
+    "launchdarkly-js-client-sdk": "^3.9.0",
+    "@launchdarkly/observability": "^0.4.8",
+    "@launchdarkly/session-replay": "^0.4.8"
   },
   "devDependencies": {
     "vite": "^5.0.0"
