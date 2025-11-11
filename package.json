@@ -10,7 +10,8 @@
   "dependencies": {
     "launchdarkly-js-client-sdk": "^3.9.0",
     "@launchdarkly/observability": "^0.4.8",
-    "@launchdarkly/session-replay": "^0.4.8"
+    "@launchdarkly/session-replay": "^0.4.8",
+    "web-vitals": "^4.2.4"
   },
   "devDependencies": {
     "vite": "^5.0.0"
