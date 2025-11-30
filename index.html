@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge;chrome=1">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Weather App - LaunchDarkly Demo</title>
+    <link rel="stylesheet" href="/css/weather-icons.min.css">
+    <link rel="stylesheet" href="./index.css">
+  </head>
+  <body>
+    <div class="weather-container">
+      <div id="app-content" class="loading">Initializing...</div>
+    </div>
+    <script type="module">
+    import * as LDClient from 'launchdarkly-js-client-sdk';
+    import Observe from '@launchdarkly/observability';
+    import SessionReplay from '@launchdarkly/session-replay';
+
+    function main()
+    {
+      console.log('🚀 LaunchDarkly Hello JavaScript Demo - Starting...');
+      
+      // Set clientSideID to your LaunchDarkly client-side ID
+      const clientSideID = import.meta.env.VITE_LD_CLIENT_SIDE_ID || '';
+      console.log('📋 Client-side ID:', clientSideID ? '✓ Configured' : '✗ Missing');
+
+      // Set flagKey to the feature flag key you want to evaluate
+      const flagKey = import.meta.env.VITE_LD_TEMPERATURE_SCALE_FLAG || 'temperature-scale';
+      console.log('🚩 Temperature scale flag key:', flagKey);
+      
+      // Theme flag for dynamic weather-based themes
+      const themeFlagKey = import.meta.env.VITE_LD_DYNAMIC_THEME_FLAG || 'dynamic-weather-theme';
+      console.log('🎨 Dynamic theme flag key:', themeFlagKey);
+
+      // Generate a new random GUID for each app load
+      function generateGUID() {
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+          const r = Math.random() * 16 | 0;
+          const v = c === 'x' ? r : (r & 0x3 | 0x8);
+          return v.toString(16);
+        });
+      }
+      
+      const userKey = generateGUID();
+      const context = {
+        kind: 'user',
+        key: userKey,
+        anonymous: true
+      };
+      console.log('👤 User context: Generated new GUID:', userKey);
+
+      const appContent = document.getElementById('app-content');
+
+      if (clientSideID === '') {
+        console.error('❌ LaunchDarkly client-side ID not configured');
+        appContent.innerHTML = '<p>Please configure your LaunchDarkly client-side ID in .env file</p>';
+        return;
+      }
+
+      // Weather API configuration
+      const weatherApiKey = import.meta.env.VITE_WEATHER_API_KEY || '';
+      console.log('🌤️  Weather API key:', weatherApiKey ? '✓ Configured' : '✗ Missing (will use mock data)');
+      let weatherData = null;
+
+      // Fetch weather data from WeatherAPI
+      async function fetchWeather(city = 'San Francisco', showLoading = false) {
+        console.log(`🌍 Fetching weather for: ${city}`);
+        
+        if (!weatherApiKey) {
+          console.warn('⚠️  Weather API key not configured, using mock data');
+          return {
+            city: 'San Francisco',
+            region: 'California',
+            country: 'United States',
+            tempCelsius: 18,
+            condition: 'Partly Cloudy',
+            icon: 'wi-day-cloudy',
+            humidity: 65,
+            windSpeed: 12,
+            feelsLike: 16,
+            localTime: new Date().toISOString().slice(0, 16).replace('T', ' '),
+            timezone: 'America/Los_Angeles'
+          };
+        }
+
+        try {
+          if (showLoading) {
+            appContent.innerHTML = '<p class="loading">Loading weather data...</p>';
+          }
+          const apiUrl = `https://api.weatherapi.com/v1/current.json?key=${weatherApiKey}&q=${city}&aqi=no`;
+          console.log(`📡 Calling Weather API for ${city}...`);
+          const response = await fetch(apiUrl);
+          
+          if (!response.ok) {
+            throw new Error(`Weather API error: ${response.status}`);
+          }
+
+          const data = await response.json();
+          console.log('✅ Weather API raw response:', data);
+          console.log('✅ Weather data received:', {
+            city: data.location.name,
+            region: data.location.region,
+            country: data.location.country,
+            temp: data.current.temp_c + '°C',
+            condition: data.current.condition.text,
+            timezone: data.location.tz_id
+          });
+          
+          // Map weather condition to weather-icons
+          const conditionMap = {
+            'Sunny': 'wi-day-sunny',
+            'Clear': 'wi-night-clear',
+            'Partly cloudy': 'wi-day-cloudy',
+            'Cloudy': 'wi-cloudy',
+            'Overcast': 'wi-cloudy',
+            'Mist': 'wi-fog',
+            'Fog': 'wi-fog',
+            'Rain': 'wi-rain',
+            'Light rain': 'wi-sprinkle',
+            'Heavy rain': 'wi-rain-wind',
+            'Snow': 'wi-snow',
+            'Thunderstorm': 'wi-thunderstorm'
+          };
+
+          const icon = conditionMap[data.current.condition.text] || 'wi-day-cloudy';
+
+          return {
+            city: data.location.name,
+            region: data.location.region,
+            country: data.location.country,
+            tempCelsius: data.current.temp_c,
+            condition: data.current.condition.text,
+            icon: icon,
+            humidity: data.current.humidity,
+            windSpeed: Math.round(data.current.wind_mph),
+            feelsLike: data.current.feelslike_c,
+            localTime: data.location.localtime,
+            timezone: data.location.tz_id
+          };
+        } catch (error) {
+          console.error('❌ Failed to fetch weather:', error);
+          observePlugin.observe?.recordError(
+            error,
+            'Failed to fetch weather data from WeatherAPI',
+            { city: city }
+          );
+          console.warn('⚠️  Falling back to mock data');
+          // Return mock data as fallback
+          return {
+            city: 'San Francisco',
+            region: 'California',
+            country: 'United States',
+            tempCelsius: 18,
+            condition: 'Partly Cloudy',
+            icon: 'wi-day-cloudy',
+            humidity: 65,
+            windSpeed: 12,
+            feelsLike: 16,
+            localTime: new Date().toISOString().slice(0, 16).replace('T', ' '),
+            timezone: 'America/Los_Angeles'
+          };
+        }
+      }
+
+      // Show welcome screen immediately
+      let isAppReady = false;
+      let userClickedEnter = false;
+      
+      appContent.innerHTML = `
+        <div style="text-align: center; padding: 40px 20px;">
+          <h1 style="font-size: 3em; margin-bottom: 20px;"><i class="wi wi-day-sunny"></i></h1>
+          <h2 style="margin-bottom: 10px;">The Weather App</h2>
+          <p style="opacity: 0.8; margin-bottom: 50px;">Demo App for LaunchDarkly JavaScript SDKs</p>
+          <button id="enter-button" style="
+            padding: 12px 32px;
+            font-size: 1.1em;
+            background: rgba(255, 255, 255, 0.2);
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 8px;
+            color: white;
+            cursor: pointer;
+            opacity: 0;
+            transition: all 0.3s ease;
+            visibility: hidden;
+          ">
+            Enter App
+          </button>
+        </div>
+      `;
+      
+      function checkAndEnableButton() {
+        const enterButton = document.getElementById('enter-button');
+        if (isAppReady && enterButton) {
+          enterButton.style.visibility = 'visible';
+          enterButton.style.opacity = '1';
+          enterButton.style.background = 'rgba(255, 255, 255, 0.3)';
+          enterButton.style.border = '2px solid rgba(255, 255, 255, 0.5)';
+          
+          enterButton.onclick = () => {
+            userClickedEnter = true;
+            console.log('🚪 User entered app');
+            render(true, true);
+          };
+        }
+      }
+
+      // Initialize SDK with observability plugins
+      const observePlugin = new Observe({
+        networkRecording: {
+          enabled: true,
+          recordHeadersAndBody: true
+        }
+      });
+
+      const ldclient = LDClient.initialize(clientSideID, context, {
+        plugins: [
+          observePlugin,
+          new SessionReplay({
+            privacySetting: 'default'
+          })
+        ]
+      });
+
+      // Apply theme based on weather condition
+      function applyWeatherTheme(condition, useDynamicTheme) {
+        const themes = {
+          'Sunny': 'linear-gradient(135deg, #56CCF2 0%, #2F80ED 100%)',
+          'Clear': 'linear-gradient(135deg, #1e3c72 0%, #2a5298 100%)',
+          'Partly cloudy': 'linear-gradient(135deg, #4b79a1 0%, #283e51 100%)',
+          'Cloudy': 'linear-gradient(135deg, #bdc3c7 0%, #2c3e50 100%)',
+          'Overcast': 'linear-gradient(135deg, #757f9a 0%, #d7dde8 100%)',
+          'Mist': 'linear-gradient(135deg, #606c88 0%, #3f4c6b 100%)',
+          'Fog': 'linear-gradient(135deg, #606c88 0%, #3f4c6b 100%)',
+          'Rain': 'linear-gradient(135deg, #2c3e50 0%, #3498db 100%)',
+          'Light rain': 'linear-gradient(135deg, #4b6cb7 0%, #182848 100%)',
+          'Heavy rain': 'linear-gradient(135deg, #141e30 0%, #243b55 100%)',
+          'Snow': 'linear-gradient(135deg, #e6dada 0%, #274046 100%)',
+          'Thunderstorm': 'linear-gradient(135deg, #232526 0%, #414345 100%)'
+        };
+
+        if (useDynamicTheme) {
+          const gradient = themes[condition] || themes['Clear'];
+          document.body.style.background = gradient;
+        } else {
+          // Static Ocean Blue theme
+          document.body.style.background = 'linear-gradient(135deg, #1e3c72 0%, #2a5298 50%, #7e8ba3 100%)';
+        }
+      }
+
+      let isInitialRender = true;
+      let cachedFlagValues = {
+        useFahrenheit: false,
+        useDynamicTheme: false
+      };
+      let currentLocation = 'San Francisco'; // Track current location for refreshes
+      
+      async function render(fullRender = false, evaluateFlags = false) {
+        // Don't render until user clicks enter
+        if (!userClickedEnter) {
+          return;
+        }
+        
+        if (!weatherData) {
+          weatherData = await fetchWeather();
+        }
+
+        // Only evaluate flags when explicitly requested (initial load or flag change)
+        if (evaluateFlags) {
+          cachedFlagValues.useFahrenheit = ldclient.variation(flagKey, false);
+          cachedFlagValues.useDynamicTheme = ldclient.variation(themeFlagKey, false);
+          
+          console.log('🎯 Flag evaluations:', {
+            [flagKey]: cachedFlagValues.useFahrenheit,
+            [themeFlagKey]: cachedFlagValues.useDynamicTheme
+          });
+        }
+        
+        const useFahrenheit = cachedFlagValues.useFahrenheit;
+        const useDynamicTheme = cachedFlagValues.useDynamicTheme;
+        
+        // Apply theme based on weather and flag
+        applyWeatherTheme(weatherData.condition, useDynamicTheme);
+        
+        // Convert temperature based on flag
+        // true = Fahrenheit, false = Celsius
+        const temp = useFahrenheit ? Math.round(weatherData.tempCelsius * 9/5 + 32) : weatherData.tempCelsius;
+        const feelsLike = useFahrenheit ? Math.round(weatherData.feelsLike * 9/5 + 32) : weatherData.feelsLike;
+        const unit = useFahrenheit ? '°F' : '°C';
+        const unitName = useFahrenheit ? 'Fahrenheit' : 'Celsius';
+        
+        // Calculate current time in the city's timezone
+        const timeStr = new Date().toLocaleTimeString('en-US', { 
+          timeZone: weatherData.timezone,
+          hour: 'numeric', 
+          minute: '2-digit',
+          hour12: true 
+        });
+        const dateStr = new Date().toLocaleDateString('en-US', { 
+          timeZone: weatherData.timezone,
+          weekday: 'long', 
+          year: 'numeric', 
+          month: 'long', 
+          day: 'numeric' 
+        });
+        
+        // Only do full render on initial load or when explicitly requested
+        if (isInitialRender || fullRender) {
+          isInitialRender = false;
+          appContent.innerHTML = `
+          <div class="location-selector">
+            <input type="text" id="city-input" placeholder="Enter city name..." value="${weatherData.city}">
+            <button id="search-button">🔍 Search</button>
+          </div>
+          
+          <h1 class="city-name">${weatherData.city}${weatherData.region ? ', ' + weatherData.region : ''}</h1>
+          <p class="date">${weatherData.country} • 🕐 ${timeStr}</p>
+          <p class="date">${dateStr}</p>
+          
+          <div class="weather-icon"><i class="wi ${weatherData.icon}"></i></div>
+          
+          <div class="temperature">
+            ${temp}<span class="temperature-unit">${unit}</span>
+          </div>
+          
+          <p class="weather-description">${weatherData.condition}</p>
+          
+          <div class="weather-details">
+            <div class="detail-item">
+              <span class="detail-label">Feels Like</span>
+              <span class="detail-value">${feelsLike}${unit}</span>
+            </div>
+            <div class="detail-item">
+              <span class="detail-label">Humidity</span>
+              <span class="detail-value">${weatherData.humidity}%</span>
+            </div>
+            <div class="detail-item">
+              <span class="detail-label">Wind</span>
+              <span class="detail-value">${weatherData.windSpeed} mph</span>
+            </div>
+          </div>
+          
+          <div class="flag-status">
+            🚩 <code>${flagKey}</code> = <strong>${useFahrenheit ? 'true' : 'false'}</strong> → <strong>${unitName}</strong><br>
+            🎨 <code>${themeFlagKey}</code> = <strong>${useDynamicTheme ? 'true' : 'false'}</strong> → <strong>${useDynamicTheme ? 'Dynamic' : 'Static'} Theme</strong>
+          </div>
+          
+          <div>
+            <button id="error-button">🐛 Record Test Error</button>
+          </div>
+          
+          <div style="margin-top: 20px;">
+            <button id="exit-button" style="
+              background: transparent;
+              border: 1px solid rgba(255, 255, 255, 0.2);
+              border-radius: 4px;
+              padding: 6px 12px;
+              color: rgba(255, 255, 255, 0.6);
+              font-size: 0.75em;
+              cursor: pointer;
+              transition: all 0.2s ease;
+            ">← Exit</button>
+          </div>
+        `;
+
+          // Add location search handler
+          const searchButton = document.getElementById('search-button');
+          const cityInput = document.getElementById('city-input');
+          
+          const handleSearch = async () => {
+            const city = cityInput.value.trim();
+            if (city) {
+              currentLocation = city; // Update the location for future refreshes
+              console.log('🔍 Location changed to:', currentLocation);
+              weatherData = await fetchWeather(city, true); // Show loading for user-initiated search
+              render(true, false); // Full render but don't re-evaluate flags
+            }
+          };
+
+          searchButton.onclick = handleSearch;
+          cityInput.onkeypress = (e) => {
+            if (e.key === 'Enter') {
+              handleSearch();
+            }
+          };
+
+          // Add exit button handler
+          document.getElementById('exit-button').onclick = () => {
+            console.log('🚪 User exited to splash screen');
+            userClickedEnter = false;
+            isInitialRender = true;
+            location.reload();
+          };
+          
+          // Add error recording button handler
+          document.getElementById('error-button').onclick = () => {
+            // Generate random error scenarios
+            const errorScenarios = [
+              { 
+                message: 'Failed to load user preferences',
+                context: 'User settings could not be retrieved from storage',
+                type: 'StorageError'
+              },
+              { 
+                message: 'Network timeout while fetching data',
+                context: 'API request exceeded 30 second timeout',
+                type: 'NetworkError'
+              },
+              { 
+                message: 'Invalid JSON response from server',
+                context: 'Server returned malformed data',
+                type: 'ParseError'
+              },
+              { 
+                message: 'Authentication token expired',
+                context: 'User session has expired and needs to re-authenticate',
+                type: 'AuthError'
+              },
+              { 
+                message: 'Database connection failed',
+                context: 'Unable to establish connection to database',
+                type: 'DatabaseError'
+              },
+              { 
+                message: 'File upload size exceeded limit',
+                context: 'Attempted to upload file larger than 10MB',
+                type: 'ValidationError'
+              }
+            ];
+
+            const scenario = errorScenarios[Math.floor(Math.random() * errorScenarios.length)];
+            const testError = new Error(scenario.message);
+            testError.name = scenario.type;
+            
+            console.log('🐛 Recording test error:', scenario.type, '-', scenario.message);
+            console.log('🐛 observePlugin.observe available?', !!observePlugin.observe);
+            
+            if (observePlugin.observe) {
+              observePlugin.observe.recordError(
+                testError,
+                scenario.context,
+                { 
+                  flagKey: flagKey, 
+                  flagValue: cachedFlagValues.useFahrenheit.toString(),
+                  errorType: scenario.type,
+                  timestamp: new Date().toISOString()
+                }
+              );
+              console.log('✅ Error recorded successfully');
+              alert(`${scenario.type} recorded! Check your LaunchDarkly Observability dashboard.`);
+            } else {
+              console.error('❌ observePlugin.observe not available');
+              alert('Error: Observability plugin not available');
+            }
+          };
+        } else {
+          // Incremental update - only update dynamic elements
+          const timeElement = document.querySelector('.date');
+          if (timeElement) {
+            timeElement.innerHTML = `${weatherData.country} • 🕐 ${timeStr}`;
+          }
+          
+          const dateElement = document.querySelectorAll('.date')[1];
+          if (dateElement) {
+            dateElement.innerHTML = dateStr;
+          }
+          
+          const tempElement = document.querySelector('.temperature');
+          if (tempElement) {
+            tempElement.innerHTML = `${temp}<span class="temperature-unit">${unit}</span>`;
+          }
+          
+          const feelsLikeElement = document.querySelector('.detail-item .detail-value');
+          if (feelsLikeElement) {
+            feelsLikeElement.innerHTML = `${feelsLike}${unit}`;
+          }
+          
+          const flagStatusElement = document.querySelector('.flag-status');
+          if (flagStatusElement) {
+            flagStatusElement.innerHTML = `
+              🚩 <code>${flagKey}</code> = <strong>${useFahrenheit ? 'true' : 'false'}</strong> → <strong>${unitName}</strong><br>
+              🎨 <code>${themeFlagKey}</code> = <strong>${useDynamicTheme ? 'true' : 'false'}</strong> → <strong>${useDynamicTheme ? 'Dynamic' : 'Static'} Theme</strong>
+            `;
+          }
+        }
+      }
+
+      ldclient.on('initialized', () => {
+        console.log('✅ LaunchDarkly SDK initialized');
+      });
+      ldclient.on('failed', () => {
+        console.error('❌ LaunchDarkly SDK failed to initialize');
+        appContent.innerHTML = '<p class="loading">SDK failed to initialize</p>';
+      });
+      ldclient.on('ready', async () => {
+        console.log('✅ LaunchDarkly SDK ready');
+        
+        // Try to get user's location
+        let defaultCity = 'San Francisco';
+        if (navigator.geolocation) {
+          try {
+            const position = await new Promise((resolve, reject) => {
+              navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 5000 });
+            });
+            const { latitude, longitude } = position.coords;
+            defaultCity = `${latitude},${longitude}`;
+            console.log('📍 Using user location:', latitude, longitude);
+          } catch (error) {
+            console.log('📍 Geolocation denied or unavailable, using default city');
+          }
+        }
+        
+        // Fetch weather data first to avoid flicker
+        weatherData = await fetchWeather(defaultCity);
+        
+        isAppReady = true;
+        checkAndEnableButton();
+        console.log('✅ App ready - waiting for user to enter');
+        
+        // Set up clock update at the top of every minute
+        function scheduleClockUpdate() {
+          const now = new Date();
+          const msUntilNextMinute = (60 - now.getSeconds()) * 1000 - now.getMilliseconds();
+          
+          console.log(`⏰ Next clock update in ${Math.round(msUntilNextMinute / 1000)} seconds at ${new Date(Date.now() + msUntilNextMinute).toLocaleTimeString()}`);
+          
+          // Schedule first update at the top of the next minute
+          setTimeout(() => {
+            console.log('🕐 Updating clock display...');
+            render(false); // Incremental update
+            
+            // Then update every 60 seconds
+            setInterval(() => {
+              console.log('🕐 Updating clock display...');
+              render(false); // Incremental update
+            }, 60000);
+          }, msUntilNextMinute);
+        }
+        
+        scheduleClockUpdate();
+        
+        // Set up automatic weather refresh every minute
+        // Store the original search query (coordinates or city name) to maintain location
+        currentLocation = defaultCity;
+        console.log('⏰ Weather data will refresh every 60 seconds for location:', currentLocation);
+        setInterval(async () => {
+          console.log('🔄 Refreshing weather data from API for:', currentLocation);
+          weatherData = await fetchWeather(currentLocation);
+          render(true, false); // Full render but don't re-evaluate flags
+        }, 60000); // 1 minute
+      });
+      ldclient.on('change', (changes) => {
+        console.log('🚩 Flag change detected:', changes);
+        render(true, true); // Full render + re-evaluate flags
+      });
+    }
+    main();
+    </script>
+  </body>
+</html>
